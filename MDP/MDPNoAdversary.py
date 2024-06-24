@@ -46,18 +46,18 @@ beta=0.95
 epsilon = 0.0001
 maxIter = 700
 
-# Define costs 
-Ca =  # Activation Cost
-Cd = 2 # Deactivation Cost
-Cs = 1 # Service Unit operation Cost
+# Define costs (in cents) 
+Ca = 1.3 # Activation Cost
+Cd = 1.3 # Deactivation Cost
+Cs = 1.3 # Service Unit operation Cost
 Ch = 1 # Request Holding cost 
-Cr = 5 # Cost of Dropped Request
+Cr = 10 # Cost of Dropped Request
 INF = 10**10 # Arbitrary cost for invalid actions
 
 # creating the state space
 N = 2 # limit on number of Service Units
 B = 5 # request Buffer
-dimSS = N*B #defining dimension
+dimSS = N*(B+1) #defining State Space dimension, covering space [1,N] x [0,B]
 stateSpace = mc.MarmoteInterval(0,dimSS-1)
 # we just created an interval from 0 to dimSS-1.
 
