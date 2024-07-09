@@ -42,7 +42,7 @@ import numpy as np
 # We want to minimize the costs at each stage
 critere = "min"
 # here is the discount factor
-beta=0.95
+#beta=0.95
 #here are the parameters for the value iteration
 epsilon = 0.0001
 maxIter = 700
@@ -56,8 +56,8 @@ Cr =  10 # Cost of Dropped Request
 INF = 10**10 # Arbitrary cost for invalid actions
 
 # creating the state space
-N = 3 # limit on number of Service Units
-B = 10 # request Buffer
+N =  3 # limit on number of Service Units
+B = 5 # request Buffer
 boxdims = np.array([N, B+1]) # dimensions of the Marmote Box defining the state space
 stateSpace = mc.MarmoteBox(boxdims) # creates state space [0, ..., N-1] x [0, B] due to python indexing
 dimSS = stateSpace.Cardinal()
@@ -72,8 +72,8 @@ def NumSUs(su,act):
     return new
 
 # transition rates
-lam = 500 # arrival rate of requests, in requests per second
-mu = 100 # departure rate of requests, in requests per second
+lam = 2 # arrival rate of requests, in requests per second
+mu = 3 # departure rate of requests, in requests per second
 LAM = lam + N*mu # maximum transition rate, used for normalization
 
 # define Cost Matrix
@@ -87,18 +87,33 @@ for k in range(dimSS):
     # define the cost for each action
     if (r == B):
         # account for full buffer
-        CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch+lam*Cr)/LAM)
+        if (n == 1):
+            # subtraction invalid at min nodes
+            CostMat.setEntry(indexO,0,INF)
+        else:
+            CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch+lam*Cr)/LAM)
         CostMat.setEntry(indexO,1,(NumSUs(n,0)*Cs+r*Ch+lam*Cr)/LAM)
-        CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch+lam*Cr)/LAM)
+        if (n == N):
+            # addition invalid at max nodes
+            CostMat.setEntry(indexO,2,INF)
+        else:
+            CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch+lam*Cr)/LAM)
     else:
-        CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch)/LAM)
+        if (n == 1):
+            # subtraction invalid at min nodes
+            CostMat.setEntry(indexO,0,INF)
+        else:
+            CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch)/LAM)
         CostMat.setEntry(indexO,1,(Cs+NumSUs(n,0)*r*Ch)/LAM)
-        CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch)/LAM)
+        if (n == N):
+            # addition invalid at max nodes
+            CostMat.setEntry(indexO,2,INF)
+        else:
+            CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch)/LAM)
     stateSpace.NextState(etat)
 
 
-print("#") 
-trans=list()
+
 
 # Compute transition value for each state.
 
@@ -112,47 +127,40 @@ for k in range(dimSS):
     n = etat[0] + 1 # number of nodes; add 1 to offset 0 index
     r = etat[1] # requests
     #condition on special cases
-    if r == 0: 
-        # empty queue, arrivals only
-        if n == 1:
-            # no valid transition, only self transition possible
-            P0.setEntry(indexO,indexO,1)
-        else:
+    # no valid transition when n = 1
+    if n > 1:
+        if r == 0: 
+            # empty queue, arrivals only
             p = lam/LAM
             sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
             sortie[1] = r + 1
             indexD = stateSpace.Index(sortie)
             P0.setEntry(indexO,indexD,p)
             P0.setEntry(indexO,indexO,1-p)
-    elif r == B:
-        # full queue, depatures only 
-        if n == 1: 
-            # no valid transition, only self transition possible
-            P0.setEntry(indexO,indexO,1)
-        else:
+        elif r == B:
+            # full queue, depatures only 
             q = mu*min(r,NumSUs(n,-1))/LAM
             sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
             sortie[1] = r - 1
             indexD = stateSpace.Index(sortie)
             P0.setEntry(indexO,indexD,q)
             P0.setEntry(indexO,indexO,1-q)
-    else:
-        # arrival
-        p = lam/LAM
-        sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
-        sortie[1] = r + 1
-        indexD = stateSpace.Index(sortie)
-        P0.setEntry(indexO,indexD,p)
-        # departure 
-        q = mu*min(r,NumSUs(n,-1))/LAM
-        sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
-        sortie[1] = r - 1
-        indexD = stateSpace.Index(sortie)
-        P0.setEntry(indexO,indexD,q)
-        P0.setEntry(indexO,indexO,1-p-q)
+        else:
+            # arrival
+            p = lam/LAM
+            sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
+            sortie[1] = r + 1
+            indexD = stateSpace.Index(sortie)
+            P0.setEntry(indexO,indexD,p)
+            # departure 
+            q = mu*min(r,NumSUs(n,-1))/LAM
+            sortie[0] = NumSUs(n,-1) - 1 # index offset by 1
+            sortie[1] = r - 1
+            indexD = stateSpace.Index(sortie)
+            P0.setEntry(indexO,indexD,q)
+            P0.setEntry(indexO,indexO,1-p-q)
     stateSpace.NextState(etat)
 
-trans.append(P0) # add the matrix to the list
 
 #Create matrix corresponding to action 0
 P1 =mc.SparseMatrix(dimSS)
@@ -196,7 +204,6 @@ for k in range(dimSS):
         P1.setEntry(indexO,indexO,1-p-q)
     stateSpace.NextState(etat)
 
-trans.append(P1) # add the matrix to the list
 
 #Create matrix corresponding to action 1
 P2 =mc.SparseMatrix(dimSS)
@@ -208,85 +215,59 @@ for k in range(dimSS):
     n = etat[0] + 1 # number of nodes; add 1 to offset 0 index
     r = etat[1] # requests
     #condition on special cases
-    if r == 0: 
-        # empty queue, arrivals only
-        if n == N:
-            # no valid transition, only self transition possible
-            P2.setEntry(indexO,indexO,1)
-        else:
+    # no valid transition when n = N
+    if n < N: 
+        if r == 0: 
+            # empty queue, arrivals only
             p = lam/LAM
             sortie[0] = NumSUs(n,1) - 1 # index offset by 1
             sortie[1] = r + 1
             indexD = stateSpace.Index(sortie)
             P2.setEntry(indexO,indexD,p)
             P2.setEntry(indexO,indexO,1-p)
-    elif r == B:
-        # full queue, depatures only 
-        if n == N: 
-            # no valid transition, only self transition possible
-            P2.setEntry(indexO,indexO,1)
-        else:
+        elif r == B:
+            # full queue, depatures only 
             q = mu*min(r,NumSUs(n,1))/LAM
             sortie[0] = NumSUs(n,1) - 1 # index offset by 1
             sortie[1] = r - 1
             indexD = stateSpace.Index(sortie)
             P2.setEntry(indexO,indexD,q)
             P2.setEntry(indexO,indexO,1-q)
-    else:
-        # arrival
-        p = lam/LAM
-        sortie[0] = NumSUs(n,1) - 1 # index offset by 1
-        sortie[1] = r + 1
-        indexD = stateSpace.Index(sortie)
-        P2.setEntry(indexO,indexD,p)
-        # departure 
-        q = mu*min(r,NumSUs(n,1))/LAM
-        sortie[0] = NumSUs(n,1) - 1 # index offset by 1
-        sortie[1] = r - 1
-        indexD = stateSpace.Index(sortie)
-        P2.setEntry(indexO,indexD,q)
-        P2.setEntry(indexO,indexO,1-p-q)
+        else:
+            # arrival
+            p = lam/LAM
+            sortie[0] = NumSUs(n,1) - 1 # index offset by 1
+            sortie[1] = r + 1
+            indexD = stateSpace.Index(sortie)
+            P2.setEntry(indexO,indexD,p)
+            # departure 
+            q = mu*min(r,NumSUs(n,1))/LAM
+            sortie[0] = NumSUs(n,1) - 1 # index offset by 1
+            sortie[1] = r - 1
+            indexD = stateSpace.Index(sortie)
+            P2.setEntry(indexO,indexD,q)
+            P2.setEntry(indexO,indexO,1-p-q)
     stateSpace.NextState(etat)
 
-trans.append(P2) # add the matrix to the list
 
 
-print("Begining of MDP building")
-mdp = mmdp.DiscountedMDP(critere, stateSpace, actionSpace, trans, CostMat,beta)
-print("End of MDP building\n")
+trans = [P0,P1,P2]
+print("#") 
+print("Building MDP")
+mdp = mmdp.AverageMDP(critere, stateSpace, actionSpace, trans, CostMat)
 
-print("Print MDP")
-print(mdp)
-print("End of Printing MDP")
-
-print("Call of  value iteration")
+print("Solving using modified Policy Iteration")
 #call the function to solve the MDP.
-optimum = mdp.ValueIteration(epsilon, maxIter)
+optimum = mdp.PolicyIterationModified(epsilon, maxIter, 0.001, 100)
 
 print("********************************")
-print("Print value iteration Solution")
-print(optimum)
-
-print("\nCall Gauss Seidel value iteration")
-optimum2 = mdp.ValueIterationGS(epsilon,10)
-print("Print Gauss Seidel value iteration Solution")
-print(optimum2)
+print("Printing Solution")
+line = optimum.SolutionByDim(1,stateSpace)
+print(line)
 
 
-print("Call of  value iteration with init")
 #call the function to solve the MDP.
-optimum3 = mdp.ValueIterationInit(epsilon,200,optimum2)
-print("********************************")
-print("Print value iteration Solution with Init")
-print("Optimum 3",optimum3)
+#optimum3 = mdp.ValueIterationInit(epsilon,200,optimum2)
 
-print("Call of Policy Iteration Modified")
-optimum4 = mdp.PolicyIterationModified(epsilon, maxIter, 0.001, 100)
+#optimum4 = 
 #0.001 and 100 are the inner loop parameters
-print("Print Policy Iteration Modified Solution") 
-print(optimum4)
-print("Policy With Str",str(optimum4))
-
-print("\nCall of Policy Iteration Modified GS")
-optimum5 = mdp.PolicyIterationModifiedGS(epsilon, maxIter, 0.001, 100)
-print("last test",optimum5)
