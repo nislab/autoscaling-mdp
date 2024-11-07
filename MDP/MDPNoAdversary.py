@@ -1,170 +1,378 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
+# coding: utf-8
 
-#Marmote and MarmoteMDP and pyMarmoteMDP are free softwares: you can redistribute it and/or modify
-#it under the terms of the GNU General Public License as published by
-#the Free Software Foundation, either version 3 of the License, or
-#(at your option) any later version.
+'''
+MDP for modeling autoscaling in a K8s enviornment for arbitrary number of service units and buffer sizes, assuming instantaneous scaling up/down at thresholds
 
-#Marmote is distributed in the hope that it will be useful,
-#but WITHOUT ANY WARRANTY; without even the implied warranty of
-#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-#GNU General Public License for more details.
+We consider a model similar to that of Tournaire et al 2023, where scaling is optimized according to minimizing SU activation/deactivation costs, rejection costs due to full buffer, and costs of servicing 
+SUs and holding requests. Similar models are considered in alternative settings by the same research group for multi-server queue models.
 
-#You should have received a copy of the GNU General Public License
-#along with MarmoteMDP. If not, see <http://www.gnu.org/licenses/>.
+We consider the model as a discrete time discounted MDP, with a hysteresis policy assumed for scaling up/down
+'''
 
-#Copyright 2019 Emmanuel Hyon, Alain Jean-Marie
-
-"""
- @brief Class to implement MDP for Kubernetes autoscaling decision 
- @author jdchambo
- @date June 2024
- @version 0.1
-
- This MDP Considers a secnario where a microservice running on Kubernetes is subject to autoscaling based on the amount of traffic present
-
- This model has three actions:
-  -1, remove a service unit
-  0, keep number of service units the same
-  1, add a service unit
-
- The number of states is variable and controlled by two variables:
-    N, the limit on the number of Service Units
-    B, a buffer for the maximum number of requests
-"""
-
-# import the library
-import marmote.core as mc
-import marmote.mdp as mmdp
+import marmote.core as mco
+import marmote.markovchain as mch
+import marmote.mdp as md
 import numpy as np
 
-# We want to minimize the costs at each stage
-critere = "min"
-# here is the discount factor
-#beta=0.95
-#here are the parameters for the modified iteration
-epsilon = 0.0001
-# delta = 0.0001
-maxIter = 1000
+'''
+ **System Parameters**
+ 
+# N - Size of the system buffer, for **N**umber of reqeusts
+# M - Maximum number of Service Units (SUs) or **M**achines permitted (choose M to avoid confusion with the system state space) 
 
-# Define costs (in cents) 
-Ca =  2 # Activation Cost
-Cd =  2 # Deactivation Cost
-Cs = 5 # Service Unit operation Cost
-Ch =  5 # Request Holding cost 
-Cr =  10 # Cost of Dropped Request
+# LAM - Poisson arrival rate of requests
+# MU - service rate of an individual SU; SUs are homogenous by design and thus have identical service rate
 
-# creating the state space
-N = 16 # limit on number of Service Units
-B = 100 # request Buffer
-boxdims = np.array([N, B+1]) # dimensions of the Marmote Box defining the state space
-stateSpace = mc.MarmoteBox(boxdims) # creates state space [0, ..., N-1] x [0, B] due to python indexing
-dimSS = stateSpace.Cardinal()
+# Costs fall into two cateogries, instantaneous costs paid when the action occurs, and accumulated costs paid at each time step 
 
-# creating the action space as interval of the possible actions labeled 0, 1, 2
-actionSpace = mc.MarmoteInterval(0,2)
-dimAS = actionSpace.Cardinal()
+# Instantaneous costs:  
+# CA - activation cost of new SU
+# CD - deactivation cost of unneeded SU
+# CR - rejection cost of request entering system to full buffer
 
-def NumSUs(su,act):
-    # determine the number of Service Units resulting from action
-    new = min(max(1,su+act),N)
-    return new
+# Accumulated costs: 
+# CS - cost per time unit of serviceing each SU
+# CH - cost per time unit of holding each request
 
-# transition rates
-lam = 0.356 # arrival rate of requests, in requests per second; corresponds to ~ interarrival time of 2.81s
-mu = 0.0003 # departure rate of requests, in requests per second; corresponds to mean serice time of ~ 0.95h or 3420s
-LAM = lam + N*mu # maximum transition rate, used for normalization
+# GAMMA - factor for discounted MDPs, gamma closer to 1 emphasizes future reward, gamma closer to 0 emphasizes short term gain ('greedy' algorithm)
 
-# define Cost Matrix
-CostMat = mc.FullMatrix(dimSS,dimAS)
-etat = np.array([0,0]) # get initial state space
-for k in range(dimSS):
-    # compute state index
-    indexO = stateSpace.Index(etat)
-    n = etat[0]+1 # number of nodes; add 1 to offset 0 index
-    r = etat[1] # requests
-    # define the cost for each action
-    if (r == B):
-        # account for full buffer
-        CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch+lam*Cr)/LAM)
-        CostMat.setEntry(indexO,1,(NumSUs(n,0)*Cs+r*Ch+lam*Cr)/LAM)        
-        CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch+lam*Cr)/LAM)
-    else:
-        CostMat.setEntry(indexO,0,(Cd+NumSUs(n,-1)*Cs+r*Ch)/LAM)
-        CostMat.setEntry(indexO,1,(Cs*NumSUs(n,0)+r*Ch)/LAM)
-        CostMat.setEntry(indexO,2,(Ca+NumSUs(n,1)*Cs+r*Ch)/LAM)
-    stateSpace.NextState(etat)
+'''
 
-#print("********************************")
-#print("Cost Matrix")
-#print(CostMat)
+N = 6
+M = 2 
+LAM = 5.0
+MU = 1.0
+CA = 1.0  
+CD = 1.0 
+CR = 10.0 
+CS = 2.0 
+CH = 2.0
+GAMMA = 1
+
+'''
+**Building the state and action spaces**
+
+# States take the form (m,n) for 1 <= m <= M, 0 <= n <= N
+# Due to python indexing, the number of machines is offset by 1, and index "0" represents the base state of 1 SU, index "1" represents 2 SUs, etc.
+# Similarly, the buffer size must be incremented by 1 to ensure the correct buffer size is reflected in the states 
 
 
-# Compute transition value for each state.
+# An action takes the form *{m-1,m,m+1}* for 1 <= m <= M, representing the number of SUs active following the action;
+# In the event the controller takes action -1 when m = 1, or action 1 when m = M, the special cases are defined s.t. the number of SUs do not change
+# But the action remains technically available to take (it simply costs extra resources due to wasted effort) 
+'''
 
-#Create matrix corresponding to each action 
-P0 = mc.SparseMatrix(dimSS) # action -1
-P1 = mc.SparseMatrix(dimSS) # action 0
-P2 = mc.SparseMatrix(dimSS) # action 1
-trans = [P0,P1,P2]
-etat = np.array([0,0]) # get initial state space
-sortie = np.array([0,0]) # array to represent the end state following transition, intialize to dummy state
-for k in range(dimSS):
-    # compute state index
-    indexO = stateSpace.Index(etat)
-    n = etat[0] + 1 # number of nodes; add 1 to offset 0 index
-    r = etat[1] # requests
-    for a in range(3):
-        act = a-1
-        # arrivals
-        if r < B:
-            p = lam/LAM
-            sortie[0] = NumSUs(n,act) - 1 #index offset by 1
-            sortie[1] = r + 1
-            indexD = stateSpace.Index(sortie)
-            trans[a].setEntry(indexO,indexD,p)
-        else:
-            # special case full buffer, no arrivals
-            p = 0
-        # departures
-        if r > 0:
-            q = mu*min(r,NumSUs(n,act))/LAM
-            sortie[0] = NumSUs(n,act) - 1 # index offset by 1
-            sortie[1] = r - 1
-            indexD = stateSpace.Index(sortie)
-            trans[a].setEntry(indexO,indexD,q)
-        else:
-            # special case empty buffer, no depatures
-            q = 0
-        # self transition psuedo event
-        trans[a].setEntry(indexO,indexO,1-p-q)
-    stateSpace.NextState(etat)
+dims=np.array([M,N+1])
+# print(dims) 
+states= mco.MarmoteBox(dims)
+#
+actions=mco.MarmoteInterval(-1,1)
+
+'''
+print("Number of states",states.Cardinal())
+print(states.Enumerate())
+print("Number of actions",actions.Cardinal())
+print("actions",actions)
+'''
+
+'''
+**Building the Transition matricies**
+
+# We define a function which computes a transition matrix associated with the action such that action index is index_action; 
+# see also pyMarmote App_Lesson2.py for an example
+
+# In each state, there are two events which can occur: system arrivals, and system depatures
+
+'''
+
+# name coordinate indicies for ease of reading
+SU = 0
+QUEUE = 1
+
+def newSU(curSU,act):
+    '''
+    Takes the current SUs and returns the new SUs following the action taken
+    generally newSU = curSU + act where act in {-1,0,1}, however if curSU = 1 or curSU = M must handle edge case appropriately
+
+    As noted above, we assume in these cases that if controller attempts to scale down/up respectively, we return to the same level; 
+    for the purposes of the cost matrix we still inccur actvation/deactivation stage costs related to wasted effort
+    '''
+    mNew = max(min(curSU+act,M),1)
+    return mNew 
+
+def fill_in_matrix(actionBuffer,stsp):
+    '''
+    Generates the transition matrix associated with the given action
+    actionBuffer - Buffer containing the action taken within the action space interval
+    stsp - the state space generated by buffer size and SU size
+
+    returns P - the transition matrix of rate of transitions from each state to each other eligible state
+    '''
+    action = actionBuffer[0]
+    # print("action",action)
+    # define the states
+    stateO = np.array([0,0]) #  Origin state, initialize to first state, corresponding to state (0,1) (empty buffer, 1 SU - note index offset)
+    stateD = np.array([0,0]) # Destination state, dummy initialization
+    afteraction = np.array([0,0]) # state after action taken, dummy initialization 
+    # define transition matrix, intiialize to empty matrix size of the state space
+    P=mco.SparseMatrix(stsp.Cardinal()) 
+    #browsing state space
+    stsp.FirstState(stateO)
+    for indexO in range(stsp.Cardinal()):
+        # compute the state after the action
+        afteraction[QUEUE] = stateO[QUEUE]
+        afteraction[SU] = newSU(stateO[SU]+1,action)-1 # account for -1 indexing offset
+        # then detail all possible transactions
+        ## Arrival (increase the number of customers by 1 with rate lambda)
+        # B-D chain, can only have arrivals entering the system if the buffer is not full
+        if (afteraction[QUEUE] < N):
+            stateD[QUEUE]=afteraction[QUEUE]+1
+            stateD[SU]=afteraction[SU]
+            #compute the index of the destination
+            indexD = stsp.Index(stateD)
+            # fill in the entry
+            P.setEntry(indexO,indexD,LAM)
+        ## Depatrue, decrease the number of custoemer by 1 with rate min(n,m)*mu
+        # B-D chain, cannot have a depature from an empty system
+        if (afteraction[QUEUE] > 0) :
+            stateD[QUEUE] = afteraction[QUEUE]-1
+            stateD[SU] = afteraction[SU]
+            # compute index of the destination
+            indexD = stsp.Index(stateD)
+            '''
+            fill in the entry; transition rate depends on the base rate, the number of Service Units, AND the number of customers
+            service rate can be no more than num SU * mu, however if the queue is smaller than the number of machines, then clearly service rate is limited by the queue size 
+            '''
+            P.setEntry(indexO,indexD,MU*min(afteraction[QUEUE],stateD[SU]+1)) # account for zero indexing for number of SUs
+        # get next state
+        stsp.NextState(stateO)
+    # print(P)
+    return P
+
+'''
+**Cost Matrix**
+
+# We define now a function to fill in the cost matrix. 
+ 
+# Instantaneous Costs are:   
+# Costs of activations = *max(action1-k1,0) \* Ca + max(action2-k2,0) \* Ca*  
+# Costs of deactivations = *max(K1-action1,0) \* Cd + max(K2-action2,0) \* Cd*  
+# rejection cost= *Cr \* lambda/Lambda(s,a)* in states where *m1=B* added by  *Cr \* action1 mu/Lambda(s,a)* in states where *m2=B*.  
+# *Lambda(s,a)* is the total rate. It is equal to *lambda + action1 \* mu + action2 \* mu* .
+
+# Accumulated Costs are:  
+# (number of customers in the system)Ch = n*Ch   
+# (number of active SUs) = m*Cs
+
+# Note that because we "allow" scaling down at m = 1/scaling up at m = M (we simply return to the previous level), we impose stage costs for the wasted work, but not
+# an infinite cost corresponding to infeasible actions. This could change in a future version of the script depending on further determinations of model behavior.  
+'''
 
 
-#print("********************************")
-#print("Probability Matrix Action = -1")
-#print(P0)
-#print("Probability Matrix Action = 0")
-#print(P1)
-#print("Probability Matrix Action = 1")
-#print(P2)
-#print("********************************") 
-print("Building MDP")
-mdp = mmdp.AverageMDP(critere, stateSpace, actionSpace, trans, CostMat)
 
+def fill_in_cost(stsp,atsp):
+    '''
+    Defines the cost matrix containing the stage cost associated with a given state, action pair
+    stsp - the state space generated by buffer size and SU size
+    atsp - the action space interval
+
+    returns R - the matrix of costs for each pair (s,a) of states and actions, where states are indexed lexiographically (i.e., all 0 SU states first, then all 1 SU states, etc.)
+    '''
+    # Create the matrix space
+    R= mco.FullMatrix(stsp.Cardinal(),atsp.Cardinal())
+    # define the states and actions
+    stateBuffer = np.array([0,0]) # initialize to state (1,0) - 1 SU, empty buffer; indexed as (0,0) due to Python index rules
+    stsp.FirstState(stateBuffer) 
+    # browse state space
+    for indexS in range(stsp.Cardinal()):
+        print("##State",stateBuffer)
+        # within state, browse action space
+        actionBuffer = atsp.StateBuffer()
+        atsp.FirstState(actionBuffer)
+        for indexA in range(atsp.Cardinal()):
+            act = actionBuffer[0] # retrieve the action associated with the current buffer
+            print("---Action",act,end='  ')
+            mprime = newSU(stateBuffer[SU]+1,act) # number of SUs after action taken, determines total rate and cost of active SUs
+            totalrate = LAM + MU*min(mprime,stateBuffer[QUEUE]) # total rate, arrivals + service rate following action
+            activationcosts = CA*max(0,act) # activation cost, paid out instantaneously upon SU activation
+            deactivationcosts = CD*abs(min(0,act)) # deactivation cost, paid out instantaneously upon SU activation
+            rejectioncosts = CR*(stateBuffer[QUEUE]//N)*LAM / totalrate # rejection cost, incurred if there is arrival to a full buffer
+            instantaneouscosts = activationcosts + deactivationcosts + rejectioncosts
+            accumulatedcosts = (stateBuffer[QUEUE]*CH + mprime*CS)/totalrate # accumulated costs, costs of running 
+            # print("Activation=",activationcosts," Deactivation=",deactivationcosts," Rejection=",rejectioncosts,end= ' ')
+            # print("Accumulatedcosts=",accumulatedcosts)
+            R.setEntry(indexS,indexA,accumulatedcosts+instantaneouscosts)
+            atsp.NextState(actionBuffer)
+        stsp.NextState(stateBuffer)
+    # print (R)    
+    return R
+
+'''
+**Build continuous time MDP** 
+
+# Build all the transition matrix corresponding to each action
+# As the actions are defined as the interval {-1,0,1}, representing the (attempted) change in number of SUs
+# The corresponding indicies k = {0,1,2} or action+1
+
+'''
+
+print("building Transition Matricies")
+trans=list()
+actionBuffer = actions.StateBuffer()
+actions.FirstState(actionBuffer)
+for indexA in range(actions.Cardinal()):
+    trans.append(fill_in_matrix(actionBuffer,states))
+    print("---Matrix kth=",indexA, "filled in")
+    actions.NextState(actionBuffer)
+
+'''
+# Fill in the cost matrix corresponding to each (state,action) pair, where states are labeled lexiographically
+'''
+
+print("building Cost Matrix")
+Costs=fill_in_cost(states,actions)
+
+
+# Build the MDP
+
+print("Building Continuous Time Discounted MDP")
+ctmdp=md.ContinuousTimeDiscountedMDP("min",states,actions,trans,Costs,GAMMA)
+print(ctmdp)
+
+'''
+# Transform the Continuous Time MDP to a Discrete Time MDP by applying uniformization factor; determined by applying the maximum transition rate
+# In the case of our model, this equals the arrival rate LAM plus service rate MU times min(M,N) - while the maximum number of SUs allowed is the
+# nominal limiting factor for service rate, if the queue size limit is smaller than maximum number of SUs permitted, customers cannot be servied faster than this limit
+'''
+
+ctmdp.UniformizeMDP()
+print("Rate of Uniformization",ctmdp.getMaximumRate())
+#*# print(ctmdp)
+
+
+# Solve MDP, using Value Iteration, and print the solution
 print("Solving using Value Iteration")
-optimum = mdp.ValueIteration(epsilon,maxIter)
-print("********************************")
-print("Printing Solution")
-line = optimum.SolutionByDim(1,stateSpace)
-print(line)
+optimum=ctmdp.ValueIteration(0.01,75) # inputs to VI are convergence threshold epsilon and maximuim number of iterations
+print(optimum)
 
-#print("Solving using modified Policy Iteration")
-#call the function to solve the MDP.
-#optimum2 = mdp.PolicyIterationModified(epsilon, maxIter, delta, maxIter)
+'''
+# Structural Analysis
 
-#print("********************************")
-#print("Printing Solution")
-#line2 = optimum2.SolutionByDim(1,stateSpace)
-#print(line2)
+# The structural analysis is mainly related to the policy handling. 
+# 
+# 1. Check property of the MDP by building a Markov Chain Associated with a policy
+# 2. Check property of the value function 
+
+# Essentially, using associated Markov Chain analysis to validate MDP results; however as multichain properties are solely valid for average mulitchain criteria
+# as opposed to discounted criteria, we build a special policy building off the examples provided in the pyMarmote package examples
+'''
+
+policy=md.FeedbackSolutionMDP(states.Cardinal())
+
+
+'''
+Fill in the policy. Define the policy as follows per the MC best-per-level hysteresis search algorithms from Tournaire 2021:
+
+Deactivate if 
+Activate if
+
+Otherwise, keep machines the same
+'''
+
+
+
+state=states.StateBuffer()
+states.FirstState(state)
+for indexS in range(states.Cardinal()):
+    if(etat[0]==(model['B1']-1) or etat[2]==(model['B2']-1) ):
+        # Activate SU, action = 1, index = 2
+        indexA = 2
+    elif :
+        # deactivate SU, action = -1, index = 0
+        indexA = 0
+    else:
+        # keep SUs the same, action = 0, index = 1
+        indexA = 1
+    policy.setActionIndex(indexS,indexA)
+    states.NextState(etat)
+print(policy)
+
+
+# **Build a Markov Chain from a policy**
+
+Mat=ctmdp.GetChain(optimum)
+Mat.set_type(mco.DISCRETE)
+#*# print(Mat)
+
+initial = mco.UniformDiscreteDistribution(0,states.Cardinal()-1)
+
+
+# Making the chain
+
+# In[ ]:
+
+
+chaine = mch.MarkovChain( Mat )
+chaine.set_init_distribution(initial)
+chaine.set_model_name( "Chain issued from the MDP")
+
+
+# **Analysis of the transition matrix**
+
+Mat.FullDiagnose()
+
+
+# **Evaluate the policy**
+# 
+# Now we can evaluate the policy by the way of the `PolicyCost` method
+
+
+
+ctmdp.PolicyCost(policy,0.01,75)
+print(policy)
+
+
+# ### Check if the value function has structural property (convex,monotone)
+
+# This is done by building a specific object `PropertiesValue`.
+
+# In[ ]:
+
+
+checkValue =  md.PropertiesValue(states)
+checkValue.avoidDetail()
+monotonicity=checkValue.Monotonicity(optimum)
+print("Printing monotonicity property of value function (1 if increasing -1 if decreasing 0 otherwise) : "\
+      + str(monotonicity) )
+
+print("Checking convexity")
+convexity=checkValue.Convexity(optimum)
+print("Printing convexity property of value function (1 if convex -1 concave 0 otherwise) : " + \
+      str(convexity))
+
+
+# The analysis can be made dimension by dimension. Now we check the monotonicty of the first dimension by letting vary the entries with index 0 and keeping the other dimensions fixed.
+
+# In[ ]:
+
+
+monotonicity=checkValue.MonotonicityByDim(optimum,0)
+print("Following dimension 0 monotonicity is",str(monotonicity))
+
+
+# ### Check if the optimal policy has structural property
+
+# The structural analysis of a policy property is carried out using a `PropertiesValue` object.
+
+# In[ ]:
+
+
+print("Checking Structural Properties of value")
+checkPolicy =  md.PropertiesPolicy(states)
+
+monotonicity=checkPolicy.Monotonicity(optimum)
+print("PropertiesPolicy::MonotonicityOptimalPolicy="+str(monotonicity))
+
+
+# End
