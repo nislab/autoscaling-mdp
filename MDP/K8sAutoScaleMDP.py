@@ -21,9 +21,8 @@ import numpy as np
 
 # **Parameters**
 # 
-# Size of the systems: B (for request Buffer)
-# 
-# Number of servers: N (for K8s Nodes)
+# Size of the systems: N - maximum size of the buffer
+# Number of Service Units: M (for Machines)
 #
 # Number of actions: A
 #  
@@ -31,13 +30,15 @@ import numpy as np
 # lam - Poisson arrival rate to the system    
 # mu - homogenized per Service Unit service rate   
 # 
-# Costs:  
+# Costs:
+# Ca - deadweight billing costs of activating/deacivating machine 
 # Cr - cost of rejecting request due to full buffer (instantaneous based on prob. of arrival)   
-# Ch - cost of request hold time; factor of SLA and expected response time based on current queue size and number of service units    
+# Cp - SLA request hold penalty for exceeding expected wait time - based on queue size
 # Cs - cost of operating each additional service unit
 # 
 # Other parameters:
 # 
+# W - wait time threshold for SLA
 # beta - factor for discounted MDP
 # epsilon - stopping factor for optimal VI solution
 # maxIter - maximum number of iterations to run solution over
@@ -46,14 +47,16 @@ import numpy as np
 # Build the model with a python dictionary
 
 model=dict()
-model['B'] = 10 
-model['N'] = 5 
+model['N'] = 11 
+model['M'] = 3 
 model['A'] = 3
-model['lam'] = 2 
-model['mu'] =  1
-model['Cr'] = 10  
-model['Cs'] = 0.013  
-model['Ch'] = 0.1 
+model['lam'] = 20
+model['mu'] =  10
+model['Ca'] = 1
+model['Cr'] = 1  
+model['Cs'] = 1
+model['Cp'] = 1
+model['W'] = 0.2 
 model['beta'] = 0.95 
 model['epsilon'] = 0.0001 
 model['maxIter'] = 10000 
@@ -66,11 +69,11 @@ print(model)
 
 # ### Build the states
 
-# The state is *(n,b)* with n from 0 to N-1 (which is off-by-1 offset for the actual number of nodes) and b from 0 to B-1 representing the number of requests. 
+# The state is *(n,b)* with n from 0 to N (which is off-by-1 offset for the actual number of nodes) and b from 0 to B-1 representing the number of requests. 
 # An action is *a* with a from 0 to 2 representing the index into the set {-1,0,1} representing the number of nodes to scale by
 
 
-dims=np.array([model['N'],model['B']])
+dims=np.array([model['M'],model['N']])
 # print(dims) 
 states= mco.MarmoteBox(dims)
 #
@@ -102,10 +105,10 @@ def new_su(su,act,modele):
     # get number of K8s nodes associated with a given state, action index
     n = su + 1 # state space index is offset by 1 from actual number of nodes 
     a = act - 1 # action space index is offset by 1 from action (in opposite direction, e.g. index 0 = subtract 1 node)
-    return max(min(n+a,modele['N']),1)
+    return max(min(n+a,modele['M']),1)
 
 # define normalization factor, which equal to the maximum transition rate possible for the system at large
-NORM = model['lam']+model['N']*model['mu']
+NORM = model['lam']+model['M']*model['mu']
 
 def fill_in_matrix(index_action,modele,ssp,asp):
     # retrieve the action asscoiated with index
@@ -128,7 +131,7 @@ def fill_in_matrix(index_action,modele,ssp,asp):
         #*# print("####index State=",k,"State",etat,"State after action",afteraction)
         # tdetail all the possible transitions
         ## Arrival (increases the number of customer in first coordinate with rate lambda)
-        if (afteraction[QUEUE]<modele['B']-1):
+        if (afteraction[QUEUE]<modele['N']-1):
             jump[QUEUE]=afteraction[QUEUE]+1
             jump[SU]=afteraction[SU]
             #compute the index of the jump
@@ -197,19 +200,26 @@ def fill_in_cost(modele,ssp,asp):
         for j in range(asp.Cardinal()):
             #*#print("---Action",acb,end='  ')
             action=acb[0]
-            if (action == 0 and etat[SU] == 0) or (action == 2 and etat[SU] == modele['N']-1):
+            if (action == 0 and etat[SU] == 0) or (action == 2 and etat[SU] == modele['M']-1):
                 R.setEntry(indexL,j,modele['INF']) # invalid action, cost = infinity
             else:
                 # set cost as normal
                 nodes = new_su(etat[SU],action,modele)
-                rejectioncosts=0.0
-                if ((modele['B']-1)==etat[QUEUE]):
-                    rejectioncosts+=(modele['lam']*modele['Cr'])/NORM 
-                accumulatedcosts = 0.0
-                accumulatedcosts=((etat[QUEUE]/(modele['lam']*nodes))*modele['Ch'] + nodes*modele['Cs'])/NORM
+                activationcosts = 0.0
+                if (action != 1):
+                    activationcosts += modele['Ca']*(modele['lam']+nodes*modele['mu'])
+                rejectioncosts = 0.0
+                if ((modele['N']-1)==etat[QUEUE]):
+                    rejectioncosts += modele['lam']*modele['Cr'] 
+                penaltycosts = 0.0
+                if (modele['W'] < etat[QUEUE]/(modele['lam']*nodes)):
+                    penaltycosts += modele['Cp']*(etat[QUEUE]-modele['lam']*modele['W']*nodes)
+                servercosts = 0.0
+                servercosts += nodes*modele['Cs']
+                normalizedcosts=(activationcosts+rejectioncosts+penaltycosts+servercosts)/NORM
                 #*#print("Rejection Costs=",rejectioncosts,end= ' ')
                 #*#print("Accumulated Costs=",accumulatedcosts)
-                R.setEntry(indexL,j,accumulatedcosts+rejectioncosts)
+                R.setEntry(indexL,j,normalizedcosts)
             asp.NextState(acb)
         ssp.NextState(etat)
     return R
@@ -230,24 +240,18 @@ for k in range(actions.Cardinal()):
 
 # print("Cost Matrix")
 Costs=fill_in_cost(model,states,actions)
-# print(Costs)
+print(Costs)
 
 # Build the MDP, specifying minimum criteria as want cost minimization for scaling policy
 
 #print("Begining of Building MDP")
-# mdp=md.DiscountedMDP("min",states,actions,trans,Costs,model['beta'])
-mdp = md.AverageMDP("min",states,actions,trans,Costs)
+mdp=md.DiscountedMDP("min",states,actions,trans,Costs,model['beta'])
+# mdp = md.AverageMDP("min",states,actions,trans,Costs)
 # print(mdp)
 
-# ### Solve the MDP using Value Iteration
+# ### Solve using Value Iteration
+optimum = mdp.ValueIteration(model['epsilon'],model['maxIter'])
+print("Value iteration solution")
+line = optimum.SolutionByDim(1,states)
+print(line)
 
-# optimum=mdp.ValueIteration(model['epsilon'],model['maxIter'])
-# print("Value iteration solution")
-# line = optimum.SolutionByDim(1,states)
-# print(line)
-
-# ### Solve using Policy Iteration
-optimum2 = mdp.PolicyIterationModified(model['epsilon'],model['maxIter'],0.001,100)
-print("Policy iteration solution")
-line2 = optimum2.SolutionByDim(1,states)
-print(line2)
