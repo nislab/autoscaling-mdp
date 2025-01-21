@@ -53,13 +53,13 @@ model['M'] = 12
 model['A'] = 3
 model['lam'] = 50
 model['mu'] =  5
-model['K'] = 40 #5 #10 #20
-model['Ca'] = 0.00316 #0
+model['K'] = 5 #10 #20
+model['Ca'] =  0 #0.00002686 #0.00316
 model['Cr'] = 2.11  
 model['Cs'] = 0.00316
 model['Cp'] = 0.0211
 model['Ck'] = 0.34
-model['W'] = 0.083 #0.167 #0.25 #0.333 #0.417 #0.5 
+model['W'] = 0.083 #0.167 #0.25
 model['beta'] = 0.95 
 model['epsilon'] = 0.0001 
 model['maxIter'] = 10000 
@@ -290,7 +290,8 @@ def set_transition_matrix_adv_entry(modele,ssp,act_buf,etat,indexL,opt_act,P):
         if act_buf == 0:
             rateArr = modele['lam']/NORMadv
         elif act_buf == 1:
-            rateArr = (modele['lam']*modele['K'])/NORMadv
+            # attack in progress, + 1 for standard arrivals
+            rateArr = (modele['lam']*(modele['K']+1))/NORMadv
         #fill in the entry
         #*# print("*Event: Arrival. Index=",indexC,"Jump State=",jump,"rate=",rateArr)
         P.setEntry(indexL,indexC,rateArr)
@@ -368,7 +369,7 @@ def attack_reward(modele,etat,action,opt_action):
     nodes = new_su(etat[SU],opt_action,modele)
     activationcosts = 0.0
     if (opt_action != 1):
-        activationcosts += modele['Ca']*(modele['lam']+nodes*modele['mu'])
+        activationcosts += modele['Ca']*(modele['lam']*(1+action*modele['K'])+nodes*modele['mu'])
     rejectioncosts = 0.0
     if ((modele['N']-1)==etat[QUEUE]):
         rejectioncosts += modele['lam']*modele['Cr'] 
