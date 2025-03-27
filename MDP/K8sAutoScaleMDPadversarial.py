@@ -54,11 +54,11 @@ model['A'] = 3
 model['lam'] = 50
 model['mu'] =  5
 model['K'] = 5 #10 #20
-model['Ca'] =  0 #0.00002686 #0.00316
-model['Cr'] = 2.11  
-model['Cs'] = 0.00316
-model['Cp'] = 0.0211
-model['Ck'] = 0.34
+model['Ca'] =  0 #0.0017 #0.01
+model['Cr'] = 7.47  
+model['Cs'] = 0.01
+model['Cp'] = 0.075
+model['Ck'] = 2
 model['W'] = 0.083 #0.167 #0.25
 model['beta'] = 0.95 
 model['epsilon'] = 0.0001 
@@ -372,10 +372,10 @@ def attack_reward(modele,etat,action,opt_action):
         activationcosts += modele['Ca']*(modele['lam']*(1+action*modele['K'])+nodes*modele['mu'])
     rejectioncosts = 0.0
     if ((modele['N']-1)==etat[QUEUE]):
-        rejectioncosts += modele['lam']*modele['Cr'] 
+        rejectioncosts += modele['lam']*(1+action*modele['K'])*modele['Cr']
     penaltycosts = 0.0
-    if (modele['W'] < etat[QUEUE]/(modele['lam']*nodes)):
-        penaltycosts += modele['Cp']*(etat[QUEUE]-modele['lam']*modele['W']*nodes)
+    if (modele['W'] < etat[QUEUE]/(modele['lam']*(1+action*modele['K'])*nodes)):
+        penaltycosts += modele['Cp']*(etat[QUEUE]-modele['lam']*(1+action*modele['K'])*modele['W']*nodes)
     servercosts = 0.0
     servercosts += nodes*modele['Cs']
     attackcosts = 0.0
@@ -465,3 +465,18 @@ advoptimum = mdpadv.ValueIteration(model['epsilon'],model['maxIter'])
 print("Policy iteration solution, Adversarial Attack Decision")
 advline = advoptimum.SolutionByDim(1,states)
 print(advline)
+
+# ### Print Thresholds
+print("Attack thresholds")
+etat = np.array([0,0])
+states.FirstState(etat)
+for k in range(states.Cardinal()):
+    indexS = states.Index(etat)
+    if etat[QUEUE] == 0:
+        idle = True
+    adv_opt_action = advoptimum.getActionIndex(indexS)
+    if (adv_opt_action == 1) and idle:
+        print("m = %d, n = %d", etat[SU], etat[QUEUE])
+        idle = False
+    if etat[QUEUE] == N and idle:
+        print("m = %d no threshold exists", etat[SU])
