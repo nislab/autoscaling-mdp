@@ -54,7 +54,7 @@ model['A'] = 3
 model['lam'] = 50
 model['mu'] =  5
 model['K'] = 5 #10 #20
-model['Ca'] =  0 #0.0017 #0.01
+model['Ca'] =  0 #0.00017 #0.01
 model['Cr'] = 7.47  
 model['Cs'] = 0.01
 model['Cp'] = 0.075
@@ -476,7 +476,6 @@ for k in range(states.Cardinal()):
         idle = True
     adv_opt_action = advoptimum.getActionIndex(indexS)
     if (adv_opt_action == 1) and idle:
-        print("m = %d, n = %d", etat[SU], etat[QUEUE])
+        print("m = {}, n = {}".format(etat[SU]+1, etat[QUEUE]))
         idle = False
-    if etat[QUEUE] == N and idle:
-        print("m = %d no threshold exists", etat[SU])
+    states.NextState(etat)
