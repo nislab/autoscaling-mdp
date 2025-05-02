@@ -1,0 +1,13 @@
+@article{chamberlainExploitingKubernetesAutoscaling2025,
+ author = {Chamberlain, Jonathan and Zheng, Jilin and Zhu, Zeying and Liu, Zaoxing and Starobinski, David},
+ doi = {10.1145/3727114},
+ journal = {Proceedings of the ACM on Measurement and Analysis of Computing Systems},
+ langid = {english},
+ month = jun,
+ number = {2},
+ pages = {29},
+ shorttitle = {Exploiting K8s Autoscaling for EDoS},
+ title = {Exploiting Kubernetes Autoscaling for Economic Denial of Sustainability},
+ volume = {9},
+ year = {2025}
+}

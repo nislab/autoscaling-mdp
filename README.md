@@ -2,6 +2,20 @@
 
 Code to generate numerical solutions to Markov Decision Processes modeling the Kubernetes autoscaling process and corresponding leader-follower security game.
 
+Within Kubernetes, there exist concerns related to autoscaling and in particular _Economic Denial of Sustainability_ which can result in cloud bills being driven up to excessive levels. However, the autoscaling problem more generally is an open question as optimizations are largely dependant on the workload type, and are not necessarily approached in a formalized way.
+
+Here, we strive to develop Markov Decision Process based models to formalize the autoscaling process, and to determine the incentives for attacking a cluster on the basis of EDoS. While some work exists on the subject of MDP based scaling models<sup>[1]</sup>, our work here features a leader-follower (Stackelberg) game in which the defender optimizes their policy, upon which the attacker determines the incentive to launch the attack.
+
+The MDPs consist of:
+- State spaces, here ordered pairs (m,n) of Service Units of computing power, and requests in the system
+- Action spaces, determining the decisions which can be made at a given time.
+- A utility function to optimize, either some cost function to minimize for cluster operations or a net revenue funciton to maximize.
+- A probability transition matrix associated with each action determining where states can transition between.
+
+Here, transitions are triggered by a single arrival or depature. The defender determines whether to add or remove a SU (or keep the SUs the same). The attacker determines whether to attack or not. The incentives depend on SLA penalties, the ongoing cost of operating the SUs, and any minimum charges imposed by the billing structure. The attacker is also subject to the cost of attacks reducing the total reward.
+
+
+[1] Tournaire, Thomas,  Hind Castel-Taleb, and Emmanuel Hyon. 2023. "Efficient Computation of Optimal Thresholds in Cloud Auto-scaling Systems". *ACM Transactions on Modeling and Performance Evaluation of Computing Systems* (December 2023) Vol 8, Issue 4.  
 
 ------------
 
@@ -69,13 +83,78 @@ The following parameters are specific to the adversarial MDP as they only apply 
 
 ## MDP Solvers
 
-The solvers leverage the discounted Value Iteration method for solving MDPs - this is based on solving a single step Bellman optimization to determine the update:
+The solvers leverage the discounted Value Iteration method for solving MDPs - this is based on solving a single step Bellman optimization to determine the update; an initial policy is chosen to populate a vector of values $V^0$. Subsequently, at each step the next vector $V^{n+1}$ is populated for each state by determining the optimal value at each state:
 
-\begin{equation}
-    \max_{a \in \mathcal{A}} \left(\mathcal{R}(s,a) + \sum_{t\in\mathcal{S}}\beta\mathcal{P}(t|s,a)V^n(t)\right)
-\end{equation}
+$V^{n+1}(s) = \max_{a \in \mathcal{A}} \left(\mathcal{R}(s,a) + \sum_{t\in\mathcal{S}}\beta\mathcal{P}(t|s,a)V^n(t)\right)$.
+
+Once $||V^{n+1} - V^n|| < \epsilon(1-\beta)/2\beta$, the solution halts (unless maxIter is reached first); the corresponding policy are the set of actions chosen at the current step $n+1$, denoted by $\pi$:
+
+$\pi_a(s) = \arg \max_{a \in \mathcal{A}} \left(\mathcal{R}(s,a) + \sum_{t\in\mathcal{S}}\beta\mathcal{P}(t|s,a)V^{n+1}(t)\right)$.
+
+To accomplish this, the code generates the discretized Semi-MDP associated with the configuration.
+
+First, by filling in the transition matrix for each action and calculating the probability of an arrival or depature event given the starting state and given action, as well as the corresponding normalization factor NORM, which is the maximum per-state transition rate. This will simply be the arrival rate plus the maximum service rate, itself a product of the service rate and the maximum number of SUs.
+
+The code then fills in the cost matrix, computing the cost to operate the cluster at each stage according to the following formula:
+
+$\mathcal{C}(s,a) = \Big((m+a)C_s + \Lambda(s,a)\mathbbm{1}_{d \neq 0}C_a + \lambda\mathbbm{1}_{n=N}C_r + (n - \lambda (m+a) W)\mathbbm{1}_{\frac{n}{(m+a)\lambda} > W}C_p  \Big)\Big/ \Tilde{\Lambda}$, where $\Lambda$ is the state transition rate at the given state, and $\Tilde{\Lambda}$ is the normalization factor NORM. Invalid actions are assigned a cost of INF.
+
+An additional helper function computes the number of SUs following an action given the minimum and maximum SU restrictions as well as the zero-index offset.
+
+In the case of the defender, the criteria for the Value Iteration is set to minimize the cost.
+
+If running the adversarial script, the output solution is used as the input for the adversarial MDP, which scans over the state space to determine the states where the defender scales up or down. The transition and cost matricies are otherwise filled in analogously, save for the fact that the actions are to attack or remain idle, and thus rates of arrival depend on the attack being active. This also results in a new normalization factor NORMadv which accounts for the attacker arrivals as part of the maximum tranistion rate.
+
+ The "cost" matrix is now a net reward defined as follows:
+$\mathcal{R}(s,a) = \Big((m+\pi(s))C_s + \Lambda_{adv}(s,\pi(s))\mathbbm{1}_{d \neq 0}C_a + (1+K\mathbbm{1}_{a=1})\lambda\mathbbm{1}_{n=N}C_r + (n - \lambda (m+\pi(s)) W)\mathbbm{1}_{\frac{n}{(m+\pi(s))(K\mathbbm{1}_{a=1}+1)\lambda} > W}C_p + K\mathbbm{1}_{a=1}C_k  \Big)\Big/ \Tilde{\Lambda_{adv}}$, where $\Tilde{\Lambda_{adv}}$ where $\Lambda_{adv}$ is the state transition rate at the given state, and $\Tilde{\Lambda_{adv}}$ is the normalization factor NORMadv. Invalid actions are assigned a cost of -INF.
+
+The resulting MDP is then run through a discounted Value Iteration of its own to determine the attacker incentive, this time based on the maximum value.
+
+Marmote supports alternative solution methods, such as directly implementing CT Discounted MDPs, the use of Policy Iteration based solutions, Gauss Sidel improvement based algorithms, and Average MDPs. The [API](https://marmote.gitlabpages.inria.fr/marmote/python_index.html) contains the full list; to change solution methods the optimum and advoptimum lines must be updated at a minimum; changing to a different MDP type (e.g. Discounted to Average) requires changing the mdp and mdpadv lines to reflect the new structure, and may require additional rewrites to accomodate differences in how structures process inputs.
 
 ## Outputs
+
+By default, the output is printed to screen; this can be redirected on the command line or code can be modified to specify the file destination.
+
+The code prints:
+The Dict structure - to validate the inputs in the solution
+The Value Iteration solution for the initial scaling problem, this is printed by dimension. For instance:
+
+'''
+etat : 4	(   0,   4)	       0.0052574   1
+etat : 5	(   0,   5)	       0.0056945   2
+'''
+
+Represents an ouput where at state (1,4), that is 1 SU, 4 requests the optimal action is to keep the number of SUs the same, with corresponding cost 0.0053, but at state (1,5) the optimal action is to scale up by 1 with corresponding cost 0.0057.
+
+If running the adversarial MDP, this is then followed by the solution for the adversarial MDP:
+
+'''
+etat : 845	(   8,  37)	       0.0158669   0
+etat : 846	(   8,  38)	       0.0245403   0
+etat : 847	(   8,  39)	               0   0
+'''
+
+In the above example, at 9 SUs the net reward is highest when the attacker remains idle, and thus the attack is never launched; in this scenario the cluster scales up by the time 39 requests enter the system and therefore the state is not visited.
+
+'''
+etat : 1155	(  11,  44)	               0   0
+etat : 1156	(  11,  45)	         0.24872   0
+etat : 1157	(  11,  46)	         1.08587   1
+'''
+
+Conversely at 12 SUs the cluster scales to 12 at 45 reuqests, but at that point there is no incentive to attack, whereas one does exist if 46 requests are present.
+
+The final output is the minimum threshold to launch the attack at each SU level. Note that this prints the actual number of SUs as this is a custom routine and not a full printout of the MDP solution from the Marmote structure, thus 
+
+'''
+Attack thresholds
+m = 10, n = 40
+m = 11, n = 42
+m = 12, n = 46
+'''
+
+Correspond to states (9,40), (10,42), and (11,46) in the actual MDP. 
 
 ------------------------
 
