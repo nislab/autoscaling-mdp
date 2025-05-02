@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Control of K8s autoscaler with single queue
-
+# Author: Jonathan Chamberlain 2024, Updated 2025, jdchambo@bu.edu
 # Code adapted from sample code for Marmote Application Lesson 2 for Application to the Control of a Tandem Multi-Server System
 # https://marmote.gitlabpages.inria.fr/marmote/pytutos/App_Lesson2.html
+
+# # Control of K8s autoscaler with single queue
 
 # In[ ]:
 

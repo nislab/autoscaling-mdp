@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Control of K8s autoscaler with single queue, and an adversary present
-
+# Author: Jonathan Chamberlain 2024, Updated 2025, jdchambo@bu.edu
 # Code adapted from sample code for Marmote Application Lesson 2 for Application to the Control of a Tandem Multi-Server System
 # https://marmote.gitlabpages.inria.fr/marmote/pytutos/App_Lesson2.html
+
+# # Control of K8s autoscaler with single queue, and an adversary present
+
+
 
 # In[ ]:
 
@@ -460,9 +463,9 @@ Reward = fill_in_reward_adv(model,states,actionsadv,optimum)
 
 mdpadv = md.DiscountedMDP("max",states,actionsadv,trans_adv,Reward,model['beta'])
 
-# ### Solve using Policy Iteration
+# ### Solve using Value Iteration
 advoptimum = mdpadv.ValueIteration(model['epsilon'],model['maxIter'])
-print("Policy iteration solution, Adversarial Attack Decision")
+print("Value iteration solution, Adversarial Attack Decision")
 advline = advoptimum.SolutionByDim(1,states)
 print(advline)
 
