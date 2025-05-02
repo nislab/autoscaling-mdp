@@ -71,7 +71,9 @@ The following parameters are specific to the adversarial MDP as they only apply 
 
 The solvers leverage the discounted Value Iteration method for solving MDPs - this is based on solving a single step Bellman optimization to determine the update:
 
-$\max_{a \in \mathcal{A}} \left(\mathcal{R}(s,a) + \sum_{t\in\mathcal{S}}\beta\mathcal{P}(t|s,a)V^n(t)\right)$
+\begin{equation}
+    \max_{a \in \mathcal{A}} \left(\mathcal{R}(s,a) + \sum_{t\in\mathcal{S}}\beta\mathcal{P}(t|s,a)V^n(t)\right)
+\end{equation}
 
 ## Outputs
 
