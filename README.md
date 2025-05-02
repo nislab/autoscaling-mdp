@@ -34,25 +34,25 @@ Marmote installation requires the Anaconda or [miniconda](https://conda.io/minic
 
 Once installed, the following installs the Marmote packages (if using Windows, first open an `anaconda prompt` or a `conda powershell` via the Start menu):
 
-'''
+```
 conda create -n marmote-use
 conda activate marmote-use
 conda install -c marmote -c conda-forge marmote
-'''
+```
 
 In addition, NumPy is required for array generation if not already installed. Conda enviornments can also be used for this:
 
-'''
+```
 conda create -n my-env
 conda activate my-env
 conda install numpy
-'''
+```
 
 Alternatively, if pip is preferred:
 
-'''
+```
 pip install numpy
-'''
+```
 [2] Jean-Marie, Alain and Emmanuel Hyon. "Marmote's Documentation" https://marmote.gitlabpages.inria.fr/marmote/about.html, Last Accessed 2025-05-02
 
 
@@ -128,39 +128,39 @@ The code prints:
 The Dict structure - to validate the inputs in the solution
 The Value Iteration solution for the initial scaling problem, this is printed by dimension. For instance:
 
-'''
+```
 etat : 4	(   0,   4)	       0.0052574   1
 etat : 5	(   0,   5)	       0.0056945   2
-'''
+```
 
 Represents an ouput where at state (1,4), that is 1 SU, 4 requests the optimal action is to keep the number of SUs the same, with corresponding cost 0.0053, but at state (1,5) the optimal action is to scale up by 1 with corresponding cost 0.0057.
 
 If running the adversarial MDP, this is then followed by the solution for the adversarial MDP:
 
-'''
+```
 etat : 845	(   8,  37)	       0.0158669   0
 etat : 846	(   8,  38)	       0.0245403   0
 etat : 847	(   8,  39)	               0   0
-'''
+```
 
 In the above example, at 9 SUs the net reward is highest when the attacker remains idle, and thus the attack is never launched; in this scenario the cluster scales up by the time 39 requests enter the system and therefore the state is not visited.
 
-'''
+```
 etat : 1155	(  11,  44)	               0   0
 etat : 1156	(  11,  45)	         0.24872   0
 etat : 1157	(  11,  46)	         1.08587   1
-'''
+```
 
 Conversely at 12 SUs the cluster scales to 12 at 45 reuqests, but at that point there is no incentive to attack, whereas one does exist if 46 requests are present.
 
 The final output is the minimum threshold to launch the attack at each SU level. Note that this prints the actual number of SUs as this is a custom routine and not a full printout of the MDP solution from the Marmote structure, thus 
 
-'''
+```
 Attack thresholds
 m = 10, n = 40
 m = 11, n = 42
 m = 12, n = 46
-'''
+```
 
 Correspond to states (9,40), (10,42), and (11,46) in the actual MDP. 
 
