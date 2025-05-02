@@ -98,7 +98,7 @@ First, by filling in the transition matrix for each action and calculating the p
 The code then fills in the cost matrix, computing the cost to operate the cluster at each stage according to the following formula:
 
 ```math
-\mathcal{C}(s,a) = \Big((m+a)C_s + \Lambda(s,a)\mathbbm{1}_{d \neq 0}C_a + \lambda\mathbbm{1}_{n=N}C_r + (n - \lambda (m+a) W)\mathbbm{1}_{\frac{n}{(m+a)\lambda} > W}C_p  \Big)\Big/ \tilde{\Lambda},
+\mathcal{C}(s,a) = \Big((m+a)C_s + \Lambda(s,a)\mathbb{1}_{d \neq 0}C_a + \lambda\mathbb{1}_{n=N}C_r + (n - \lambda (m+a) W)\mathbb{1}_{\frac{n}{(m+a)\lambda} > W}C_p  \Big)\Big/ \tilde{\Lambda},
 ```
 
 where $\Lambda$ is the state transition rate at the given state, and $\tilde{\Lambda}$ is the normalization factor NORM. Invalid actions are assigned a cost of INF.
