@@ -97,7 +97,7 @@ First, by filling in the transition matrix for each action and calculating the p
 
 The code then fills in the cost matrix, computing the cost to operate the cluster at each stage according to the following formula:
 
-$\mathcal{C}(s,a) = \Big((m+a)C_s + \Lambda(s,a)\mathbbm{1}_{d \neq 0}C_a + \lambda\mathbbm{1}_{n=N}C_r + (n - \lambda (m+a) W)\mathbbm{1}_{\frac{n}{(m+a)\lambda} > W}C_p  \Big)\Big/ \tilde{\Lambda}$,
+$$\mathcal{C}(s,a) = \Big((m+a)C_s + \Lambda(s,a)\mathbbm{1}_{d \neq 0}C_a + \lambda\mathbbm{1}_{n=N}C_r + (n - \lambda (m+a) W)\mathbbm{1}_{\frac{n}{(m+a)\lambda} > W}C_p  \Big)\Big/ \tilde{\Lambda}$$,
 
 where $\Lambda$ is the state transition rate at the given state, and $\tilde{\Lambda}$ is the normalization factor NORM. Invalid actions are assigned a cost of INF.
 
@@ -108,7 +108,7 @@ In the case of the defender, the criteria for the Value Iteration is set to mini
 If running the adversarial script, the output solution is used as the input for the adversarial MDP, which scans over the state space to determine the states where the defender scales up or down. The transition and cost matricies are otherwise filled in analogously, save for the fact that the actions are to attack or remain idle, and thus rates of arrival depend on the attack being active. This also results in a new normalization factor NORMadv which accounts for the attacker arrivals as part of the maximum tranistion rate.
 
 The "cost" matrix is now a net reward defined as follows:
-$\mathcal{R}(s,a) = \Big((m+\pi(s))C_s + \Lambda_{adv}(s,\pi(s))\mathbbm{1}_{d\neq 0}C_a + (1+K\mathbbm{1}_{a=1})\lambda\mathbbm{1}_{n=N}C_r + (n - \lambda(m+\pi(s)) W)\mathbbm{1}_{\frac{n}{(m+\pi(s))(K\mathbbm{1}_{a=1}+1)\lambda} > W}C_p + K\mathbbm{1}_{a=1}C_k\Big)\Big/ \tilde{\Lambda}_{adv}$, 
+$$\mathcal{R}(s,a) = \Big((m+\pi(s))C_s + \Lambda_{adv}(s,\pi(s))\mathbbm{1}_{d\neq 0}C_a + (1+K\mathbbm{1}_{a=1})\lambda\mathbbm{1}_{n=N}C_r + (n - \lambda(m+\pi(s)) W)\mathbbm{1}_{\frac{n}{(m+\pi(s))(K\mathbbm{1}_{a=1}+1)\lambda} > W}C_p + K\mathbbm{1}_{a=1}C_k\Big)\Big/ \tilde{\Lambda}_{adv}$$, 
 
  where $\Lambda_{adv}$ is the state transition rate at the given state, and $\tilde{\Lambda}_{adv}$ is the normalization factor NORMadv. Invalid actions are assigned a cost of -INF.
 
